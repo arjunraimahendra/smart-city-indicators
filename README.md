@@ -1,1 +1,1 @@
-# smart-city-indicators
+# Smart City Indicators
