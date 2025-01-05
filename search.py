@@ -11,6 +11,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import streamlit as st
+import concurrent.futures
 
 from pydantic import BaseModel, Field
 
@@ -44,7 +45,9 @@ llm = ChatOpenAI(model="gpt-4o", temperature=0)
 
 indicator_prompt = """ 
 **Objective:**  
-Find the {indicator} for {city} from reputable and up-to-date online sources, then determine its maturity level based on the provided thresholds.
+Please find the information for the below indicator for the given city from reputable and up-to-date online sources, then determine the maturity level of the indictor on a scale from 1 to 5.
+Indicator: {indicator}
+City: {city}
 
 **Instructions:**  
 1. **Data Extraction:**  
@@ -67,17 +70,14 @@ Find the {indicator} for {city} from reputable and up-to-date online sources, th
    - Follow this format:
      ```markdown
      ### Sources
-     [1] Full link - https://www.example-first.com/path  
-     [2] Full link - https://www.example-second.com/path
+     [1] https://www.example-first.com/path  
+     [2] https://www.example-second.com/path
      ```
    - Each cited source should be the full url mentioned in the context, with schema (example: https), domain (www.example-first.com), along with path, query and fragment provided in the context above.
 
 5. **Maturity Assessment Mapping:**  
-   - After obtaining the indicator value, compare it against the provided maturity scale.  
-   - Use the thresholds given. The maturity assessment levels for the "{indicator}" are defined as:  
-    {maturity_scale}
-    
-   Assign the correct maturity level based on where the identified value falls within these ranges.
+   - After obtaining the indicator value, determine the maturity level of the indictor on a scale from 1 to 5.  
+   - Assign the correct maturity level based on where the identified value falls within these ranges.
 
 6. **Formatting the Final Answer:**  
    - Present the final answer in a clear, concise manner.  
@@ -91,13 +91,13 @@ Find the {indicator} for {city} from reputable and up-to-date online sources, th
      [2] https://www.example-second.com/path
 
 **Example of Final Output Format:**  
-- Indicator: "[*Indicator Name*]"  
-- Data Found: [*Exact numeric value or best estimate with source reference*]  
-- Maturity Level: [*1-5, as determined by the thresholds*]
+- Indicator: "Percentage of population covered by at least a 4G mobile network"  
+- Data Found: 97 
+- Maturity Level: 5
 
 **Additional Guidance:**  
 - If data cannot be found directly, look for related municipal reports, annual performance reviews, or recognized urban analytics services that may provide proxy indicators or related statistics.  
-- If no credible data is found after a thorough check, note that no data is available and consider the default or lowest maturity level, if instructed.
+- If no credible data is found after a thorough check, note that no data is available and return the maturity level of 0.
 """
 
 
@@ -113,7 +113,7 @@ extraction_prompt = """
     - A maturity level (an integer between 1 and 5) that corresponds to that data value based on predefined thresholds
 
     Your task:
-    - Identify the numeric value of the indicator from the provided text. If the answer states something like "Data Found: 47 datasets," then indicator_value = 47.
+    - Identify the numeric value of the indicator from the provided texts. If the answer states something like "Data Found: 47 datasets," then indicator_value = 47.
     - Identify the integer maturity score assigned to that value. For example, if the answer states "Maturity Level: 4," then maturity_score = 4.
     - Validate that indicator_value is a float (it can be an integer type number as well, but represented as float is acceptable) and maturity_score is an integer between 1 and 5.
 
@@ -161,6 +161,45 @@ Category: Connectivity
    Maturity levels: 1: <60%, 2: 60-75%, 3: 76-90%, 4: 91-98%, 5: >98%
 
 Please provide indicators and maturity levels for the following category: {category}
+"""
+
+find_indicator_prompt = """ 
+You are a smart city assessment expert. Given a category, provide an indicator and their corresponding maturity assessment level for evaluating a city's performance in that category.
+
+Requirements for the response:
+1. Provide one measurable indicators for the given category
+2. The indicator should:
+   - Be quantifiable and objective
+   - Have clear units of measurement
+   - Be relevant to the category
+   - Be applicable across different city sizes and contexts
+3. For each indicator, provide a 5-level maturity assessment scale where:
+   - Level 1 represents basic/beginning implementation
+   - Level 2 represents developing capability
+   - Level 3 represents established capability
+   - Level 4 represents advanced capability
+   - Level 5 represents leading/exemplary performance
+4. Format the response as follows:
+   - List the indicator with its unit of measurement
+   - Follow each indicator immediately with its 5-level maturity scale
+   - Use numerical ranges or percentages where appropriate
+   - Separate levels clearly using commas
+
+Example format:
+Category: [Category Name]
+Output: 
+[Indicator] ([unit])
+Maturity levels: 1: [range], 2: [range], 3: [range], 4: [range], 5: [range]
+
+
+For reference, here is an example output:
+Category: Connectivity
+1. Fixed broadband subscriptions per 100 inhabitants
+   Maturity levels: 1: <10, 2: 10-25, 3: 26-40, 4: 41-55, 5: >55
+2. Percentage of population covered by at least a 4G mobile network
+   Maturity levels: 1: <60%, 2: 60-75%, 3: 76-90%, 4: 91-98%, 5: >98%
+
+Please provide the indicator and maturity levels for the following category: {category}
 """
 
 ####################################
@@ -232,7 +271,6 @@ class PerplexitySearchHandler:
 
     def _create_payload(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
         """Create the API request payload"""
-        print("------3-------")
         return {
             "model": self.model,
             "messages": [
@@ -264,19 +302,16 @@ class PerplexitySearchHandler:
             response_dict = response.json()
             response_choice = response_dict.get("choices", [])
             response_citations = response_dict.get("citations", [])
-            print("------5-------")
             
             if not response_choice:
                 self.logger.error("_handle_response: No choices found in response")
                 raise PerplexityAPIError("_handle_response: No choices found in response")
             
-            print("------6-------")
             response_message = response_choice[0].get("message", {})
             if not response_message:
                 self.logger.error("_handle_response: No message found in response")
                 raise PerplexityAPIError("_handle_response: No message found in response")
             
-            print("------7-------")
             return response_message.get("content", ""), response_citations
             
         except json.JSONDecodeError as e:
@@ -322,7 +357,6 @@ class PerplexitySearchHandler:
                 json=self._create_payload(system_prompt, user_prompt),
                 headers=headers
             )
-            print("------4-------")
             return self._handle_response(response)
             
         return _make_request_inner()
@@ -352,7 +386,6 @@ class PerplexitySearchHandler:
             raise ValueError("search: User prompt must be a non-empty string")
 
         try:
-            print("------2-------")
             self.logger.info(f"search: Executing search query: {user_prompt[-100:]}")
             return self._make_request_method(system_prompt, user_prompt)
             
@@ -372,7 +405,6 @@ def perplexity_search_func(system_prompt: str, user_prompt: str):
             max_wait=60,
             temperature=0.2
         )
-        print("------1-------")
         # Perform search
         results, citations = search_handler.search(system_prompt, user_prompt)
         # print("Search Results:", results)
@@ -389,6 +421,8 @@ def perplexity_search_func(system_prompt: str, user_prompt: str):
     except Exception as e:
         search_handler.logger.error(f"perplexity_search_func: Unexpected error: {str(e)}")
         raise PerplexitySearchError(f"perplexity_search_func: Unexpected error: {str(e)}")
+    
+
 
 
 ##########################################
@@ -478,7 +512,7 @@ class MaturityScore(BaseModel):
     maturity_score: int = Field(
         ...,
         description=(
-            "The assigned maturity level of the indicator, expressed as an integer between 1 and 5, inclusive. "
+            "The assigned maturity level of the indicator, expressed as an integer between 0 and 5, inclusive. The value is 0 only when no data is found."
             "This value is determined by comparing the extracted 'indicator_value' against predefined threshold ranges. "
             "For example, if the thresholds for this indicator are defined as: "
             "Level 1: <10"  
@@ -488,74 +522,75 @@ class MaturityScore(BaseModel):
             "Level 5: >55"
             " and the indicator_value is 47, "
             "then the maturity_score would be 4. "
-            "This field must be a whole number (no decimals) and must always fall within the range of 1 to 5."
+            "This field must be a whole number (no decimals) and must always fall within the range of 0 to 5. The value is 0 only when no data is found."
         )
     )
 
 
-def search_func(city: str, indicator: str, maturity_scale: str):
-    perplexity_result, citations = perplexity_search_func(system_prompt=perplexity_system_prompt.format(indicator=indicator, city=city), user_prompt=indicator_prompt.format(indicator=indicator, city=city, maturity_scale=format_maturity_levels(maturity_scale)))
+# def search_func(city: str, indicator: str):
+    # perplexity_result, citations = perplexity_search_func(system_prompt=perplexity_system_prompt.format(indicator=indicator, city=city), user_prompt=indicator_prompt.format(indicator=indicator, city=city))
 
+    # # Structured LLM
+    # structured_llm = llm.with_structured_output(MaturityScore)
+
+    # # Invoke the LLM to get the list of economic levers
+    # maturity_value = structured_llm.invoke([SystemMessage(content=extraction_prompt)] + [HumanMessage(content=f"Extract the indicator value and maturity score from the output of perplexity search:\n {perplexity_result}")])
+
+#     return perplexity_result, citations, maturity_value.indicator_value, maturity_value.maturity_score
+
+def extract_info(result_output: str):
     # Structured LLM
     structured_llm = llm.with_structured_output(MaturityScore)
 
-    # Invoke the LLM to get the list of economic levers
-    maturity_value = structured_llm.invoke([SystemMessage(content=extraction_prompt)] + [HumanMessage(content=f"Extract the indicator value and maturity score from the output of perplexity search:\n {perplexity_result}")])
+    # Invoke the LLM to get maturity score and indicator value
+    maturity_value = structured_llm.invoke([SystemMessage(content=extraction_prompt)] + [HumanMessage(content=f"Extract the indicator value and maturity score from the output: \n {result_output}")])
 
-    return perplexity_result, citations, maturity_value.indicator_value, maturity_value.maturity_score
+    recheck_prompt_template = """
+    Your task is to check that the indicator value (delimited by ###) and maturity value (delimited by $$$) is properly extracted from the search response based on the perplexity search (delimited by @@@). If yes, just output the indicator value and maturity score (without the delimiters). If no, then make the extraction from the search result again.
 
+    Search Response: @@@ {result_output} @@@
 
-
-# Function to create a spider chart
-def create_spider_chart_old(indicators, values, title, color):
+    Indicator Value: ### {indicator_value} ###
+    Maturity Value: $$$ {maturity_score} $$$
     """
-    Creates a professional spider (radar) chart.
 
-    Parameters:
-    - indicators: List of indicators.
-    - values: List of values corresponding to each category.
-    - title: Title of the chart.
-    - color: Color for the area plot.
-    """
-    # Number of variables
-    num_vars = len(indicators)
-    
-    # Compute angle for each axis
-    angles = np.linspace(0, 2 * np.pi, num_vars, endpoint=False).tolist()
-    
-    # Complete the circle
-    values += values[:1]
-    angles += angles[:1]
-    
-    # Create a radar chart
-    fig, ax = plt.subplots(figsize=(6, 6), subplot_kw=dict(polar=True))
-    
-    # Draw the outline of the chart
-    ax.fill(angles, values, color=color, alpha=0.25)
-    ax.plot(angles, values, color=color, linewidth=2)
-    
-    # Add labels to the chart
-    ax.set_yticks([1, 2, 3, 4, 5])
-    ax.set_yticklabels(["1", "2", "3", "4", "5"], fontsize=10)
-    ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(indicators, fontsize=12)
-    
-    # Add title
-    ax.set_title(title, fontsize=16, pad=20)
-    
-    # Add grid lines and make it visually appealing
-    ax.grid(color='gray', linestyle='--', linewidth=0.5)
-    ax.spines['polar'].set_visible(False)
-    
-    st.pyplot(fig)
+    if maturity_value.maturity_score == 0:
+        maturity_value = structured_llm.invoke([SystemMessage(content=extraction_prompt)] + [HumanMessage(content=recheck_prompt_template.format(result_output=result_output, indicator_value=maturity_value.indicator_value, maturity_score=maturity_value.maturity_score))])
 
-# # Example data format
-# indicators = ['Communication', 'Teamwork', 'Problem-solving', 'Adaptability', 'Leadership']
-# values = [2, 4, 5, 2, 1]
+    return maturity_value
 
-# # Generate the spider diagram
-# create_spider_chart(indicators, values, 'Skill Assessment', 'red')
 
+def search_func(city: str, indicators: List):
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        # Parallelize over indicators
+        futures_perplexity = [executor.submit(perplexity_search_func, system_prompt=perplexity_system_prompt.format(indicator=indicator, city=city), user_prompt=indicator_prompt.format(indicator=indicator, city=city)) for indicator in indicators]
+        results_perplexity = [f.result() for f in futures_perplexity]
+
+        # futures_llm = [executor.submit(llm.invoke, [SystemMessage(content=perplexity_system_prompt.format(indicator=indicator, city=city))] + [HumanMessage(content=indicator_prompt.format(indicator=indicator, city=city))]) for indicator in indicators]
+        # results_llm = [f.result() for f in futures_llm]
+
+    # Extract perplexity_result and citations from results
+    perplexity_outputs = [result[0] for result in results_perplexity]
+    citations = [result[1] for result in results_perplexity]
+    # llm_outputs = [result.content for result in results_llm]
+    # final_outputs = [f"#### Perplexity Result: \n {output1} \n\n---\n\n #### GPT Result: \n {output2}" for output1, output2 in zip(perplexity_outputs, llm_outputs)]
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        # Parallelize over structured LLM calls
+        # futures = [executor.submit(llm.with_structured_output(MaturityScore).invoke, [SystemMessage(content=extraction_prompt)] + [HumanMessage(content=f"Extract the indicator value and maturity score from the output of perplexity search:\n {perplexity_result}")]) for perplexity_result in perplexity_results]
+        futures_extract = [executor.submit(extract_info, output) for output in perplexity_outputs]
+        maturity_values = [f.result() for f in futures_extract]
+
+    # Extract indicator_value and maturity_score from maturity_values
+    indicator_values = [maturity_value.indicator_value for maturity_value in maturity_values]
+    maturity_scores = [maturity_value.maturity_score for maturity_value in maturity_values]
+
+    return perplexity_outputs, citations, indicator_values, maturity_scores
+
+
+
+
+# Generate the spider diagram
 def create_spider_chart(indicators, values_dict, title):
     """
     Creates an overlapping radar (spider) chart for multiple cities.
@@ -623,7 +658,7 @@ class WebIndicators(BaseModel):
         description=(
             "A comprehensive set of indicators identified for evaluating a city's performance in a given category."
             "For example, if the category is 'Sanitation' then the indicators are: "
-            "['Access to Improved Sanitation Facilities (% of population)' Maturity levels', 'Wastewater Treatment Coverage (% of wastewater treated)', 'Frequency of Waste Collection (times per week)' , 'Public Toilet Availability (number of public toilets per 10,000 inhabitants)' , 'Recycling Rate (% of total waste recycled)' ]"
+            "['Access to Improved Sanitation Facilities (% of population)', 'Wastewater Treatment Coverage (% of wastewater treated)', 'Frequency of Waste Collection (times per week)' , 'Public Toilet Availability (number of public toilets per 10,000 inhabitants)' , 'Recycling Rate (% of total waste recycled)' ]"
         )
     )
     maturity_levels_list: List[str] = Field(
@@ -633,6 +668,25 @@ class WebIndicators(BaseModel):
             "This value is determined by comparing the extracted 'indicator_value' against predefined threshold ranges. "
             "For example, if the category is 'Sanitation' then the maturity levels for the identified indicators are: "
             "['1: <50%, 2: 50-70%, 3: 71-85%, 4: 86-95%, 5: >95%', '1: <30%, 2: 30-50%, 3: 51-70%, 4: 71-90%, 5: >90%', '1: <1, 2: 1-2, 3: 3-4, 4: 5-6, 5: Daily', '1: <1, 2: 1-3, 3: 4-6, 4: 7-9, 5: >9', '1: <10%, 2: 10-25%, 3: 26-40%, 4: 41-60%, 5: >60%']"
+        )
+    )
+
+class Indicator(BaseModel):
+    indicator: str = Field(
+        ...,
+        description=(
+            "Indicator identified for evaluating a city's performance in a given category."
+            "For example, if the category is 'Sanitation' then an indicator is: "
+            "'Access to Improved Sanitation Facilities (% of population)'"
+        )
+    )
+    maturity_level: str = Field(
+        ...,
+        description=(
+            "Assigned maturity level for the indicator, expressed as an integer between 1 and 5, inclusive. "
+            "This value is determined by comparing the extracted 'indicator_value' against predefined threshold ranges. "
+            "For example, if the category is 'Sanitation' and the identified indicator is - 'Access to Improved Sanitation Facilities (% of population)' then the maturity level for the identified indicator is: "
+            "'1: <50%, 2: 50-70%, 3: 71-85%, 4: 86-95%, 5: >95%'"
         )
     )
 
@@ -650,3 +704,17 @@ def fetch_indicators_from_web(category: str):
     web_indicators = structured_llm.invoke([HumanMessage(content=f"Extract the list of indicators and the list of their maturity scores from the output:\n {indicator_list.content}")])
 
     return web_indicators.indicator_list, web_indicators.maturity_levels_list
+
+
+def fetch_indicator(category: str):
+    # Structured LLM
+    structured_llm = llm.with_structured_output(Indicator)
+
+    # Invoke the LLM to get the list of economic levers
+    indicator = structured_llm.invoke([SystemMessage(find_indicator_prompt.format(category=category))])
+
+    return indicator.indicator, indicator.maturity_level
+
+
+
+
