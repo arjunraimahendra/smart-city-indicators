@@ -2,7 +2,7 @@ import streamlit as st
 import matplotlib.pyplot as plt
 import pandas as pd
 import concurrent.futures
-from search_v3 import read_indicators_file, search_func, format_maturity_levels, create_spider_chart, fetch_indicators_from_web, fetch_indicator, check_for_data
+from search import read_indicators_file, search_func, format_maturity_levels, create_spider_chart, fetch_indicators_from_web, fetch_indicator, check_for_data
 
 # Streamlit UI
 
