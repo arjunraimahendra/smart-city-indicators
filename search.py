@@ -127,7 +127,7 @@ find_indicators_prompt = """
 You are a smart city assessment expert. Given a category, provide a comprehensive set of indicators and their corresponding maturity assessment levels for evaluating a city's performance in that category.
 
 Requirements for the response:
-1. Provide at least 5 distinct, measurable indicators for the given category
+1. Provide at least 30 distinct, measurable indicators for the given category
 2. Each indicator should:
    - Be quantifiable and objective
    - Have clear units of measurement
@@ -194,10 +194,8 @@ Maturity levels: 1: [range], 2: [range], 3: [range], 4: [range], 5: [range]
 
 For reference, here is an example output:
 Category: Connectivity
-1. Fixed broadband subscriptions per 100 inhabitants
+   Indicator: Fixed broadband subscriptions per 100 inhabitants
    Maturity levels: 1: <10, 2: 10-25, 3: 26-40, 4: 41-55, 5: >55
-2. Percentage of population covered by at least a 4G mobile network
-   Maturity levels: 1: <60%, 2: 60-75%, 3: 76-90%, 4: 91-98%, 5: >98%
 
 Please provide the indicator and maturity levels for the following category: {category}
 """
@@ -716,5 +714,18 @@ def fetch_indicator(category: str):
     return indicator.indicator, indicator.maturity_level
 
 
+def check_for_data(df: pd.DataFrame, city: str):
+    perplexity_results, citations, indicator_values, maturity_scores = search_func(city, df["Indicator"].unique())
+    df["Maturity Score"] = maturity_scores
+    df["Perplexity Output"] = perplexity_results
+    df["Indicator Values"] = indicator_values
+
+    # Filter indicators where Maturity Score is not zero
+    filtered_df = df[df['Maturity Score'] > 0]
+
+    # Sort by Maturity Score in descending order and select the top 10
+    top_indicators_df = filtered_df.sort_values(by='Maturity Score', ascending=False).head(5)
+
+    return top_indicators_df
 
 
