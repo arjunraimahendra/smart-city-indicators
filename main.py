@@ -2,7 +2,7 @@ import streamlit as st
 import matplotlib.pyplot as plt
 import pandas as pd
 import concurrent.futures
-from search import read_indicators_file, search_func, format_maturity_levels, create_spider_chart, fetch_indicators_from_web, fetch_indicator, check_for_data
+from search_v3 import read_indicators_file, search_func, format_maturity_levels, create_spider_chart, fetch_indicators_from_web, fetch_indicator, check_for_data
 
 # Streamlit UI
 
@@ -15,6 +15,9 @@ if "city_inputs" not in st.session_state:
 
 if "add_city_clicks" not in st.session_state:
     st.session_state.add_city_clicks = 1
+
+if "indicator_bool" not in st.session_state:
+    st.session_state.indicator_bool = False
 
 # Function to add a new city input field
 def add_city_input():
@@ -45,40 +48,55 @@ with col2:
     if st.button("Remove City", on_click=remove_city_input):
         pass
 
+
+# Get the list of cities
+city_list = [st.session_state[f"city_{i+1}"] for i in range(len(st.session_state.city_inputs))]
+city_list = list(set(city for city in city_list if city))  # Remove empty fields
+st.session_state.city_list = city_list
+
 # Get the list of indicators and their categories
 combined_df = read_indicators_file()
 
 # Checkbox to dynamically fetch indicators from the web
 use_web = st.checkbox("Fetch indicators dynamically from the web")
 
-# Unified input for "Category" (either text input or dropdown)
-if use_web:
-    selected_category = st.text_input("Category (type the indicator category):")
-else:
-    selected_category = st.selectbox("Category (select the indicator category from dropdown):", combined_df["Category"].unique(), index=None)
+col_indicators_1, col_indicators_2 = st.columns([3, 1])
+
+with col_indicators_1:
+    # Unified input for "Category" (either text input or dropdown)
+    if use_web:
+        selected_category = st.text_input("Category (type the indicator category):")
+    else:
+        selected_category = st.selectbox("Category (select the indicator category from dropdown):", combined_df["Category"].unique(), index=None)
+
+with col_indicators_2:
+    # Add space to align the button to the bottom
+    st.markdown("<div style='height: 1.6em;'></div>", unsafe_allow_html=True) 
+    indicator_button_clicked = st.button("Get Indicators", use_container_width=True)
 
 # Fetch indicators based on the selected/typed category
-if selected_category:
-    indicator_list, maturity_levels_list = fetch_indicators_from_web(category=selected_category)
-    filtered_df = pd.DataFrame({
-        'Indicator': indicator_list,
-        'Category': [selected_category] * len(indicator_list),
-        'Maturity Assessment (1-5)': maturity_levels_list
-    })
+if selected_category and indicator_button_clicked:
+    st.session_state.indicator_bool = True
+    with st.spinner("Generating the Indicator List"):
+        indicator_list, maturity_levels_list = fetch_indicators_from_web(category=selected_category)
+        filtered_df = pd.DataFrame({
+            'Indicator': indicator_list,
+            'Category': [selected_category] * len(indicator_list),
+            'Maturity Assessment (1-5)': maturity_levels_list
+        })
+        top_indicators_df = check_for_data(filtered_df, st.session_state.city_list[0])
+        st.session_state.final_indicator_list = list(top_indicators_df["Indicator"])
+        st.session_state.city0_outputs = list(top_indicators_df["Perplexity Output"])
+        st.session_state.city0_maturity_scores = list(top_indicators_df["Maturity Score"])
 
-    city_list = [st.session_state[f"city_{i+1}"] for i in range(len(st.session_state.city_inputs))]
-    city_list = list(set(city for city in city_list if city))  # Remove empty fields
-    st.session_state.city_list = city_list
-    
-    top_indicators_df = check_for_data(filtered_df, st.session_state.city_list[0])
-    st.session_state.final_indicator_list = list(top_indicators_df["Indicator"])
-    st.session_state.city0_outputs = list(top_indicators_df["Perplexity Output"])
-    st.session_state.city0_maturity_scores = list(top_indicators_df["Maturity Score"])
-
-    st.markdown("#### Indicators:")
+# Show the list of final indicators
+if st.session_state.indicator_bool:
+    st.subheader("Indicators:")
     st.markdown("\n\n".join([indicator for indicator in st.session_state.final_indicator_list]))
 
 
+# Generate the Radar Graph
+st.subheader("Generate Radar Graph")
 if st.button("Radar Graph"): 
     if st.session_state.city_list and selected_category:
         with st.spinner(f"Generating radar graph for cities: {', '.join(st.session_state.city_list)}, please wait..."):
@@ -117,6 +135,6 @@ if st.button("Radar Graph"):
 
             # Render the Markdown content
             st.markdown(combined_results)
-        st.success("Radar graph generated for both cities successfully!")
+        st.success("Successfully generated the Radar graph for the cities!")
     else:
         st.warning("Please enter at least one city and select a category.")
