@@ -714,7 +714,7 @@ def fetch_indicator(category: str):
     return indicator.indicator, indicator.maturity_level
 
 
-def check_for_data(df: pd.DataFrame, city: str):
+def check_for_data(df: pd.DataFrame, city: str, ascending: bool):
     perplexity_results, citations, indicator_values, maturity_scores = search_func(city, df["Indicator"].unique())
     df["Maturity Score"] = maturity_scores
     df["Perplexity Output"] = perplexity_results
@@ -724,7 +724,7 @@ def check_for_data(df: pd.DataFrame, city: str):
     filtered_df = df[df['Maturity Score'] > 0]
 
     # Sort by Maturity Score in descending order and select the top 10
-    top_indicators_df = filtered_df.sort_values(by='Maturity Score', ascending=False).head(5)
+    top_indicators_df = filtered_df.sort_values(by='Maturity Score', ascending=ascending).head(5)
 
     return top_indicators_df
 
