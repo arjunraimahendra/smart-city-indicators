@@ -2,7 +2,7 @@ import streamlit as st
 import matplotlib.pyplot as plt
 import pandas as pd
 import concurrent.futures
-from search import read_indicators_file, search_func, format_maturity_levels, create_spider_chart, fetch_indicators_from_web, fetch_indicator, check_for_data
+from search_v3 import read_indicators_file, search_func, format_maturity_levels, create_spider_chart, fetch_indicators_from_web, fetch_indicator, check_for_data
 
 # Streamlit UI
 
@@ -60,7 +60,11 @@ combined_df = read_indicators_file()
 # Checkbox to dynamically fetch indicators from the web
 use_web = st.checkbox("Fetch indicators dynamically from the web")
 
-col_indicators_1, col_indicators_2 = st.columns([3, 1])
+# Initialize session state
+if "ascending" not in st.session_state:
+    st.session_state["ascending"] = False  # Default to Bottom 5
+
+col_indicators_1, col_indicators_2, col_indicators_3= st.columns([6, 4, 2])
 
 with col_indicators_1:
     # Unified input for "Category" (either text input or dropdown)
@@ -70,9 +74,20 @@ with col_indicators_1:
         selected_category = st.selectbox("Category (select the indicator category from dropdown):", combined_df["Category"].unique(), index=None)
 
 with col_indicators_2:
+    # Create a radio button toggle
+    option = st.radio(
+        "Choose to display Top 5 or Bottom 5 indicators:",
+        ("Top 5 Indicators", "Bottom 5 Indicators")
+    )
+    # Update session state based on the selection
+    st.session_state["ascending"] = option != "Top 5 Indicators"
+
+with col_indicators_3:
     # Add space to align the button to the bottom
-    st.markdown("<div style='height: 1.6em;'></div>", unsafe_allow_html=True) 
+    st.markdown("<div style='height: 1.9em;'></div>", unsafe_allow_html=True) 
     indicator_button_clicked = st.button("Get Indicators", use_container_width=True)
+
+
 
 # Fetch indicators based on the selected/typed category
 if selected_category and indicator_button_clicked:
@@ -84,7 +99,7 @@ if selected_category and indicator_button_clicked:
             'Category': [selected_category] * len(indicator_list),
             'Maturity Assessment (1-5)': maturity_levels_list
         })
-        top_indicators_df = check_for_data(filtered_df, st.session_state.city_list[0])
+        top_indicators_df = check_for_data(filtered_df, st.session_state.city_list[0], ascending=st.session_state["ascending"])
         st.session_state.final_indicator_list = list(top_indicators_df["Indicator"])
         st.session_state.city0_outputs = list(top_indicators_df["Perplexity Output"])
         st.session_state.city0_maturity_scores = list(top_indicators_df["Maturity Score"])
